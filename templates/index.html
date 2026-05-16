@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <title>Analisador de Leads</title>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <nav class="topbar">
+    <span class="topbar-brand">LeadScan</span>
+    <span class="topbar-tag">Analisador de Leads</span>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="hero-label">Google Places · CSV</div>
+    <h1>Analise seus leads<br>em segundos</h1>
+    <p>Carregue um CSV do Apify e veja quem tem site próprio, redes sociais, domínio grátis ou nenhum link.</p>
+  </header>
+
+  <!-- Upload card -->
+  <div class="upload-wrap">
+    <div class="upload-card">
+      <form id="uploadForm" enctype="multipart/form-data">
+        <div class="upload-row">
+          <label for="csvInput" class="file-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Escolher CSV
+          </label>
+          <input id="csvInput" type="file" name="csv" accept=".csv" class="input-file" />
+          <span id="filename" class="filename">Nenhum arquivo selecionado</span>
+          <button class="btn-analisar" type="submit">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            Analisar
+          </button>
+        </div>
+        <div class="upload-hint">
+          <span class="hint-dot"></span>
+          Suporta arquivos exportados pelo Apify · Google Places Scraper
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="results-wrap" id="resultsWrap" style="display:none">
+    <div class="stats-bar" id="statsBar"></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="tab-contents" id="tabContents"></div>
+  </div>
+
+  <script>
+  (function () {
+    const form = document.getElementById('uploadForm');
+    const fileInput = document.getElementById('csvInput');
+    const filenameEl = document.getElementById('filename');
+    const resultsWrap = document.getElementById('resultsWrap');
+    const statsBar = document.getElementById('statsBar');
+    const tabsEl = document.getElementById('tabs');
+    const contentsEl = document.getElementById('tabContents');
+
+    const LABELS = {
+      'Lead-certo-redes-sociais': 'Redes Sociais',
+      'Lead-sem-link': 'Sem Link',
+      'Lead-certo-site-gratis': 'Site Grátis',
+      'Lead-certo-link-de-redirecionamento': 'Encurtadores',
+      'Lead-certo-plataforma-de-conteudo': 'Plataformas',
+      'Site-próprio': 'Site Próprio',
+      'Lead-certo-outros': 'Outros'
+    };
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) {
+        filenameEl.textContent = file.name;
+        filenameEl.classList.add('selected');
+      } else {
+        filenameEl.textContent = 'Nenhum arquivo selecionado';
+        filenameEl.classList.remove('selected');
+      }
+    });
+
+    function clear(el) { el.innerHTML = ''; }
+
+    function initials(name) {
+      if (!name) return '?';
+      return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+    }
+
+    function leadHTML(lead) {
+      const name = lead.title || 'Sem título';
+      const phone = lead.phone || null;
+      const website = lead.website || null;
+      const meta = [
+        phone ? `📞 ${phone}` : null,
+        website ? `<a href="${website}" target="_blank" rel="noopener">${website}</a>` : 'sem site'
+      ].filter(Boolean).join('<span style="color:var(--border)"> · </span>');
+
+      return `
+        <div class="lead">
+          <div class="lead-icon">${initials(name)}</div>
+          <div class="lead-body">
+            <div class="lead-name">${name}</div>
+            <div class="lead-meta">${meta}</div>
+          </div>
+        </div>`;
+    }
+
+    function render(data) {
+      clear(statsBar);
+      clear(tabsEl);
+      clear(contentsEl);
+
+      const cats = Object.keys(data);
+      const total = cats.reduce((s, c) => s + (data[c]?.length || 0), 0);
+
+      // Stats bar
+      const statCard = (num, label) => `
+        <div class="stat-card">
+          <div class="stat-number">${num}</div>
+          <div class="stat-label">${label}</div>
+        </div>`;
+
+      statsBar.innerHTML = statCard(total, 'Total de leads');
+      const proprio = data['Site-próprio']?.length || 0;
+      const semLink = data['Lead-sem-link']?.length || 0;
+      const redesSociais = data['Lead-certo-redes-sociais']?.length || 0;
+      statsBar.innerHTML += statCard(proprio, 'Site próprio');
+      statsBar.innerHTML += statCard(semLink, 'Sem link');
+      statsBar.innerHTML += statCard(redesSociais, 'Redes sociais');
+
+      // "Todos" tab
+      const makeTab = (cat, label, active) => {
+        const btn = document.createElement('button');
+        btn.className = 'tab' + (active ? ' active' : '');
+        btn.dataset.cat = cat;
+        btn.textContent = label;
+        return btn;
+      };
+
+      const allTab = makeTab('Todos', `Todos (${total})`, true);
+      tabsEl.appendChild(allTab);
+
+      const allContent = document.createElement('div');
+      allContent.className = 'tab-content active';
+      allContent.dataset.cat = 'Todos';
+      allContent.innerHTML = cats.map(c => `
+        <div class="section-title">${LABELS[c] || c} <span style="font-family:'DM Sans';font-size:0.8rem;color:var(--muted);font-weight:400">(${data[c].length})</span></div>
+        ${data[c].map(leadHTML).join('')}
+      `).join('');
+      contentsEl.appendChild(allContent);
+
+      cats.forEach(cat => {
+        const label = `${LABELS[cat] || cat} (${data[cat].length})`;
+        const btn = makeTab(cat, label, false);
+        tabsEl.appendChild(btn);
+
+        const content = document.createElement('div');
+        content.className = 'tab-content';
+        content.dataset.cat = cat;
+        content.innerHTML = `<div class="section-title">${LABELS[cat] || cat}</div>` + data[cat].map(leadHTML).join('');
+        contentsEl.appendChild(content);
+      });
+
+      // Tab switching
+      tabsEl.addEventListener('click', e => {
+        const btn = e.target.closest('.tab');
+        if (!btn) return;
+        tabsEl.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        contentsEl.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        const target = contentsEl.querySelector(`[data-cat="${btn.dataset.cat}"]`);
+        if (target) target.classList.add('active');
+      });
+
+      resultsWrap.style.display = 'block';
+      resultsWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      resultsWrap.style.display = 'block';
+      statsBar.innerHTML = '';
+      tabsEl.innerHTML = '';
+      contentsEl.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          Analisando leads...
+        </div>`;
+
+      const formData = new FormData(this);
+      fetch('/analisar', { method: 'POST', body: formData })
+        .then(res => { if (!res.ok) throw new Error('Erro no servidor'); return res.json(); })
+        .then(render)
+        .catch(err => {
+          contentsEl.innerHTML = `<div class="error">⚠️ ${err.message || 'Erro ao analisar o arquivo.'}</div>`;
+        });
+    });
+  })();
+  </script>
+</body>
+</html>
